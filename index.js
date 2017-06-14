@@ -6,6 +6,8 @@ var request = require('request-promise');
 var morgan = require('morgan');
 
 
+var version = 1;
+var prices = ['3500', '9000', '15000', '25000']
 var app = express();
 var port = process.env.port || 9282;
 var router = express.Router();
@@ -213,21 +215,23 @@ var changePass = function (username, oldPass, password) {
 
 }
 
-var removeService = function (username) {
+var removeService = function (username,password) {
     var url = 'https://api.vpnm.me/resellers/v2/user/' + username;
     var options = {
         url: url,
         method: 'DELETE',
         headers: headers,
     };
-    return promise = new Promise(function (resolve, reject) {
-        request(options).then(function (body) {
-            User.findOneAndRemove({ username: username }, function (err) {
+    User.findOneAndRemove({username:username, password:password},function(err) {
+        if (!err) {
+            return promise = new Promise(function (resolve, reject) {
+                request(options).then(function (body) {
+                    resolve(true);
+                }).catch(function (err) {
+                    reject(false);
+                });
             });
-            resolve(true);
-        }).catch(function (err) {
-            reject(false);
-        });
+        }
     });
 }
 
@@ -243,11 +247,11 @@ router.put('/users/:user/password', function (req, res) {
 
 router.delete('/users/:user', function (req, res) {
     let username = req.params.user;
-    removeService(username).then(function (boolVal) {
+    removeService(username,req.body.pass).then(function (boolVal) {
         res.json({ success: true, message: 'نام کاربری و سرویس شما حذف شد.' });
     }).catch(function (boolVal) {
         res.json({ success: false, message: 'متاسفانه نام کاربری یافت نشد.' });
-    });
+    });a
 });
 
 router.get('/users/:user', function (req, res) {
@@ -268,15 +272,15 @@ router.post('/users/new', function (req, res) {
 });
 
 router.put('/users/:user/topup', function (req, res) {
-    renewVpn(req.body.username, req.body.credit, req.body.authority, req.body.amount).then(function (body) {
+    renewVpn(req.params.user, req.body.credit, req.body.authority, req.body.amount).then(function (body) {
         res.json({ success: true, message: 'سرویس شما تمدید شد.' });
     }).catch(function (err) {
         res.json({ success: false, message: 'با پشتیبانی تماس بگیرید.' });
     });
 });
 
-router.get('/app/startup', function (req, res) {
-    res.json({ success: true, message: '' })
+router.get('/startup', function (req, res) {
+    res.json({ success: true, version:version, prices})
 });
 
 router.get('/invoices/validate', function (req, res) {
