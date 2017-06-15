@@ -11,10 +11,10 @@ var prices = ['3500', '9000', '15000', '25000']
 var app = express();
 var port = process.env.port || 9282;
 var router = express.Router();
-var zarinpal = zarinpalCheckout.create('MERCHANT-ID||MERCHANT-ID|MERCHANT-ID', false);
+var zarinpal = zarinpalCheckout.create('MERCHANT-ID||MERCHANT-ID|MERCHANT-ID', true);
 var headers = {
-    'X-Auth-Name': 'Auth name',
-    'X-Auth-Key': 'Auth Key',
+    'X-Auth-Name': 'X-AUTH-NAME',
+    'X-Auth-Key': 'X-AUTH-KEY',
     'Content-Type': 'application/json'
 };
 
@@ -40,23 +40,25 @@ var invoiceSchema = new mongoose.Schema({
     mail: String,
     authority: String,
     amount: Number,
-    done: Boolean
+    done: Boolean,
+    renewal: Boolean,
+    claimed: Boolean
 })
 var Invoice = mongoose.model('Invoice', invoiceSchema);
 
 
 
-var newPayment = function (amount, email, username) {
+var newPayment = function (amount, email, username, renewal) {
     return promise = new Promise(function (resolve, reject) {
         zarinpal.PaymentRequest({
             Amount: amount,
-            CallbackURL: 'https://veepee.myfuckingapi.com/api/invoices/validate',
+            CallbackURL: 'http://192.168.1.38:9282/invoices/validate',
             Description: 'پرداخت درون برنامه ای',
             Email: email,
             Mobile: '09120000000'
         }).then(response => {
             if (response.status === 100) {
-                var invoice = new Invoice({ username: username, mail: email, authority: response.url, amount: amount, done: false });
+                var invoice = new Invoice({ username: username, mail: email, authority: response.authority, amount: amount, done: false, renewal: renewal, claimed: false });
                 invoice.save(function (err) {
                     if (!err) {
                         resolve(response.url);
@@ -71,17 +73,24 @@ var newPayment = function (amount, email, username) {
     });
 }
 
-var isPaymentDone = function (zarinpalAuth, amount) {
-    Invoice.findOne({ authority: zarinpalAuth, amount: amount }, function (err, object) {
-        if (!err && object) {
-            if (object.done) {
-                return true;
+var isPaymentDone = function (zarinpalAuth, amount, renewal) {
+    console.log(1);
+    return promise = new Promise(function (resolve, reject) {
+        Invoice.findOne({ authority: zarinpalAuth, amount: amount }, function (err, object) {
+            if (!err && object) {
+                console.log(2);
+                if (object.done && !object.claimed && object.renewal === renewal) {
+                    console.log(4);
+                    resolve(true);
+                } else {
+                    console.log(5);
+                    reject(false);
+                }
             } else {
-                return false;
+                console.log(3);
+                reject(false);
             }
-        } else {
-            return false;
-        }
+        });
     });
 }
 
@@ -96,26 +105,33 @@ var getUserInfo = function (username) {
     return promise;
 }
 
-var createAccountCore = function (user, pass, credit) {
+var createAccountCore = function (username, pass, credit) {
     var dataString = '{"credit":' + credit + ',"password":"' + pass + '"}';
-    var url = 'https://api.vpnm.me/resellers/v2/user/' + user;
+    var url = 'https://api.vpnm.me/resellers/v2/user/' + username;
     var options = {
         url: url,
         method: 'POST',
         headers: headers,
         body: dataString
     };
+    console.log('authority');
     var promise = new Promise(function (resolve, reject) {
         request(options).then(function (body) {
-            var user = new User({ username: user, password: pass, credit: credit });
-            user.save(function (err) {
+            console.log('bodymune', body);
+            Invoice.findOneAndUpdate({ username: username }, { claimed: true }, function (err) {
                 if (!err) {
-                    resolve(true);
-                } else {
-                    reject(false);
+                    var user = new User({ username: username, password: pass, credit: credit });
+                    user.save(function (err) {
+                        if (!err) {
+                            resolve(true);
+                        } else {
+                            reject(false);
+                        }
+                    });
                 }
             });
         }).catch(function (err) {
+            console.log(err)
             reject(false);
         });
     });
@@ -123,25 +139,34 @@ var createAccountCore = function (user, pass, credit) {
 }
 
 var renewVpnCore = function (username, credit) {
-    var dataString = '{"credit":' + credit + '}';
-    var url = 'https://api.vpnm.me/resellers/v2/user/' + username + '/credit';
-    var options = {
-        url: url,
-        method: 'PUT',
-        headers: headers,
-        body: dataString
-    };
     var promise = new Promise(function (resolve, reject) {
-        request(options).then(function (body) {
-            User.findOneAndUpdate({ username: username }, { credit: credit }, function (err, object) {
-                if (!err && object) {
-                    resolve(true);
-                } else {
-                    reject(false);
-                }
-            });
-        }).catch(function (err) {
-            reject(false)
+        User.findOne({ username: username }, function (err, obj) {
+            if (!err && obj) {
+                let currentCredit = obj.credit;
+                let creditToSet = currentCredit + credit;
+                var dataString = '{"credit":' + creditToSet + '}';
+                var url = 'https://api.vpnm.me/resellers/v2/user/' + username + '/credit';
+                var options = {
+                    url: url,
+                    method: 'PUT',
+                    headers: headers,
+                    body: dataString
+                };
+                request(options).then(function (body) {
+                    User.findOneAndUpdate({ username: username }, { credit: creditToSet }, function (err, object) {
+                        if (!err && object) {
+                            resolve(true);
+                        } else {
+                            reject(false);
+                        }
+                    });
+                }).catch(function (err) {
+                    reject(false)
+                });
+
+            } else {
+                reject(false);
+            }
         });
     });
     return promise;
@@ -161,27 +186,33 @@ var payedAmountToCredit = function (amount) {
 }
 
 var createAccount = function (authority, payedAmount, creditToAdd, username, password) {
-    if (isPaymentDone(authority, payedAmount)) {
-        if (createAccountCore(username, password, payedAmountToCredit(payedAmount))) {
-            return true
-        } else {
-            return false
-        }
-    } else {
-        return false
-    }
+    return promise = new Promise(function (resolve, reject) {
+        isPaymentDone(authority, payedAmount, false).then(function (boolVal) {
+            let credit = payedAmountToCredit(payedAmount);
+            createAccountCore(username, password, credit).then(function (boolVal) {
+                resolve(true);
+            }).catch(function (boolVal) {
+                reject(false);
+            });
+        }).catch(function (boolVal) {
+            reject(false);
+        });
+    });
 }
 
 var renewVpn = function (username, credit, authority, payedAmount) {
-    if (isPaymentDone(authority, payedAmount)) {
-        if (renewVpnCore(username, payedAmountToCredit(payedAmount))) {
-            return true
-        } else {
-            return false
-        }
-    } else {
-        return false
-    }
+    return promise = new Promise(function (resolve, reject) {
+        isPaymentDone(authority, payedAmount, true).then(function (boolVal) {
+            let creditVal = payedAmountToCredit(payedAmount);
+            renewVpnCore(username, creditVal).then(function (boolVal) {
+                resolve(true);
+            }).catch(function (boolVal) {
+                reject(false);
+            });
+        }).catch(function (boolVal) {
+            reject(false);
+        });
+    });
 }
 
 var changePass = function (username, oldPass, password) {
@@ -199,15 +230,19 @@ var changePass = function (username, oldPass, password) {
                 request(options).then(function (body) {
                     User.findOneAndUpdate({ username: username, password: oldPass }, { password: password }, function (err, object) {
                         if (!err) {
+                            console.log(1);
                             resolve(true);
                         } else {
+                            console.log(2);
                             reject(false);
                         }
                     });
                 }).catch(function (err) {
+                    console.log(3);
                     reject(false)
                 });
             } else {
+                console.log(3);
                 reject(false);
             }
         });
@@ -215,23 +250,28 @@ var changePass = function (username, oldPass, password) {
 
 }
 
-var removeService = function (username,password) {
+var removeService = function (username, password) {
     var url = 'https://api.vpnm.me/resellers/v2/user/' + username;
     var options = {
         url: url,
         method: 'DELETE',
         headers: headers,
     };
-    User.findOneAndRemove({username:username, password:password},function(err) {
-        if (!err) {
-            return promise = new Promise(function (resolve, reject) {
+    console.log('hello bitch');
+    return promise = new Promise(function (resolve, reject) {
+        User.findOneAndRemove({ username: username, password: password }, function (err, object) {
+            console.log('hello mf')
+            if (!err && object) {
+                console.log('kiri khan');
                 request(options).then(function (body) {
+                    console.log('kiirrrrrrr');
                     resolve(true);
                 }).catch(function (err) {
+                    console.log('maman kos', err);
                     reject(false);
                 });
-            });
-        }
+            }
+        });
     });
 }
 
@@ -247,11 +287,11 @@ router.put('/users/:user/password', function (req, res) {
 
 router.delete('/users/:user', function (req, res) {
     let username = req.params.user;
-    removeService(username,req.body.pass).then(function (boolVal) {
+    removeService(username, req.body.pass).then(function (boolVal) {
         res.json({ success: true, message: 'نام کاربری و سرویس شما حذف شد.' });
     }).catch(function (boolVal) {
         res.json({ success: false, message: 'متاسفانه نام کاربری یافت نشد.' });
-    });a
+    });
 });
 
 router.get('/users/:user', function (req, res) {
@@ -264,9 +304,9 @@ router.get('/users/:user', function (req, res) {
 });
 
 router.post('/users/new', function (req, res) {
-    createAccount(req.body.authority, req.body.amount, req.body.credit, req.body.username, req.body.password).then(function (body) {
+    createAccount(req.body.authority, req.body.amount, req.body.credit, req.body.username, req.body.password).then(function (boolVal) {
         res.json({ success: true, message: 'سرویس شما ایجاد شد.' });
-    }).catch(function (err) {
+    }).catch(function (boolVal) {
         res.json({ success: false, message: 'با پشتیبانی تماس بگیرید.' });
     });
 });
@@ -280,12 +320,13 @@ router.put('/users/:user/topup', function (req, res) {
 });
 
 router.get('/startup', function (req, res) {
-    res.json({ success: true, version:version, prices})
+    res.json({ success: true, version: version, prices })
 });
 
 router.get('/invoices/validate', function (req, res) {
     Invoice.findOne({ authority: req.query.Authority }, function (err, object) {
-        if (!err) {
+        if (!err && object) {
+            console.log('evrything ok')
             zarinpal.PaymentVerification({
                 Amount: object.amount,
                 Authority: req.query.Authority,
@@ -314,7 +355,7 @@ router.get('/invoices/validate', function (req, res) {
 });
 
 router.post('/invoices/new', function (req, res) {
-    newPayment(req.body.amount, req.body.mail, req.body.username).then(function (response) {
+    newPayment(req.body.amount, req.body.mail, req.body.username, req.body.renewal).then(function (response) {
         res.json({ success: true, message: response });
     }).catch(function (err) {
         res.json({ success: false, message: 'اشکال در آغاز پرداخت.' })
