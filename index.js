@@ -74,20 +74,15 @@ var newPayment = function (amount, email, username, renewal) {
 }
 
 var isPaymentDone = function (zarinpalAuth, amount, renewal) {
-    console.log(1);
     return promise = new Promise(function (resolve, reject) {
         Invoice.findOne({ authority: zarinpalAuth, amount: amount }, function (err, object) {
             if (!err && object) {
-                console.log(2);
                 if (object.done && !object.claimed && object.renewal === renewal) {
-                    console.log(4);
                     resolve(true);
                 } else {
-                    console.log(5);
                     reject(false);
                 }
             } else {
-                console.log(3);
                 reject(false);
             }
         });
@@ -114,10 +109,8 @@ var createAccountCore = function (username, pass, credit) {
         headers: headers,
         body: dataString
     };
-    console.log('authority');
     var promise = new Promise(function (resolve, reject) {
         request(options).then(function (body) {
-            console.log('bodymune', body);
             Invoice.findOneAndUpdate({ username: username }, { claimed: true }, function (err) {
                 if (!err) {
                     var user = new User({ username: username, password: pass, credit: credit });
@@ -131,7 +124,6 @@ var createAccountCore = function (username, pass, credit) {
                 }
             });
         }).catch(function (err) {
-            console.log(err)
             reject(false);
         });
     });
@@ -230,19 +222,15 @@ var changePass = function (username, oldPass, password) {
                 request(options).then(function (body) {
                     User.findOneAndUpdate({ username: username, password: oldPass }, { password: password }, function (err, object) {
                         if (!err) {
-                            console.log(1);
                             resolve(true);
                         } else {
-                            console.log(2);
                             reject(false);
                         }
                     });
                 }).catch(function (err) {
-                    console.log(3);
                     reject(false)
                 });
             } else {
-                console.log(3);
                 reject(false);
             }
         });
@@ -257,17 +245,12 @@ var removeService = function (username, password) {
         method: 'DELETE',
         headers: headers,
     };
-    console.log('hello bitch');
     return promise = new Promise(function (resolve, reject) {
         User.findOneAndRemove({ username: username, password: password }, function (err, object) {
-            console.log('hello mf')
             if (!err && object) {
-                console.log('kiri khan');
                 request(options).then(function (body) {
-                    console.log('kiirrrrrrr');
                     resolve(true);
                 }).catch(function (err) {
-                    console.log('maman kos', err);
                     reject(false);
                 });
             }
@@ -326,7 +309,6 @@ router.get('/startup', function (req, res) {
 router.get('/invoices/validate', function (req, res) {
     Invoice.findOne({ authority: req.query.Authority }, function (err, object) {
         if (!err && object) {
-            console.log('evrything ok')
             zarinpal.PaymentVerification({
                 Amount: object.amount,
                 Authority: req.query.Authority,
@@ -337,7 +319,6 @@ router.get('/invoices/validate', function (req, res) {
                     var id = object._id;
                     Invoice.findByIdAndUpdate(id, { done: true }, function (err, obj) {
                         if (err) {
-                            console.log(err);
                         } else if (!obj) {
                             res.redirect('veepee://failed');
                         } else {
